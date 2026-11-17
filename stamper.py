@@ -71,15 +71,74 @@ def check_area(page, rect):
     # Text in the proposed interior is never silently covered.
     interior = fitz.Rect(rect.x0 + 4, rect.y0 + 4, rect.x1 - 4, rect.y1 - 4)
     if page.get_textbox(interior).strip():
-        return Placement(tuple(rect), "review", "Text occupies the proposed box; draw a clear area.")
+        return Placement(tuple(rect), "occupied", "Existing text or stamp occupies the box. Skipped to prevent covering it.")
     pix = page.get_pixmap(matrix=fitz.Matrix(1, 1), clip=interior * page.rotation_matrix,
                           colorspace=fitz.csRGB, alpha=False)
     data = pix.samples
     total = max(1, pix.width * pix.height)
     dark = sum(min(data[i:i + 3]) < 200 for i in range(0, len(data), 3)) / total
-    if dark > 0.025:
-        return Placement(tuple(rect), "review", "Existing ink or image content detected; inspect before approving.")
+    coloured = sum(max(data[i:i + 3]) - min(data[i:i + 3]) > 45
+                   and min(data[i:i + 3]) < 190 for i in range(0, len(data), 3)) / total
+    if dark > 0.025 or coloured > 0.004:
+        return Placement(tuple(rect), "occupied", "Possible existing stamp or ink in the box. Skipped to prevent double stamping.")
     return Placement(tuple(rect), "ready", "Label and empty stamp box detected.")
+
+
+def vector_boxes(page):
+    """Recognize closed paths AND boxes drawn as four independent dotted strokes."""
+    boxes, horizontal, vertical = [], [], []
+    for drawing in page.get_drawings():
+        if drawing.get("type") not in ("s", "fs"):
+            continue
+        rect = fitz.Rect(drawing["rect"])
+        if 60 <= rect.width <= 320 and 30 <= rect.height <= 180:
+            # A path bounding box alone is not proof of a rectangle.
+            items = drawing.get("items", [])
+            if any(item[0] == "re" for item in items):
+                boxes.append(rect)
+        for item in drawing.get("items", []):
+            if item[0] != "l":
+                continue
+            a, b = item[1:3]
+            if abs(a.y - b.y) < 1 and 60 <= abs(a.x - b.x) <= 320:
+                horizontal.append((min(a.x, b.x), max(a.x, b.x), (a.y + b.y) / 2))
+            if abs(a.x - b.x) < 1 and 30 <= abs(a.y - b.y) <= 180:
+                vertical.append(((a.x + b.x) / 2, min(a.y, b.y), max(a.y, b.y)))
+    for x0, x1, top in horizontal:
+        for bx0, bx1, bottom in horizontal:
+            if not (30 <= bottom - top <= 180 and abs(x0 - bx0) <= 3 and abs(x1 - bx1) <= 3):
+                continue
+            sides = [x for x, y0, y1 in vertical if abs(y0 - top) <= 3 and abs(y1 - bottom) <= 3]
+            if any(abs(x - x0) <= 3 for x in sides) and any(abs(x - x1) <= 3 for x in sides):
+                boxes.append(fitz.Rect(x0, top, max(x1, bx1), bottom))
+    unique = []
+    for rect in boxes:
+        if not any(max(abs(a - b) for a, b in zip(rect, old)) < 3 for old in unique):
+            unique.append(rect)
+    return unique
+
+
+def stamp_labels(page, textpage=None):
+    """Use word positions, tolerating nonstandard space glyphs in certificate PDFs."""
+    import re
+    words = page.get_text("words", textpage=textpage)
+    lines = {}
+    for word in words:
+        lines.setdefault((word[5], word[6]), []).append(word)
+    found = []
+    for line in lines.values():
+        line.sort(key=lambda w: w[0])
+        normalized = [re.sub(r"[^a-z&]", "", w[4].lower()) for w in line]
+        for phrase in ANCHORS:
+            tokens = phrase.lower().split()
+            for i in range(len(line) - len(tokens) + 1):
+                if normalized[i:i + len(tokens)] == tokens:
+                    rect = fitz.Rect(line[i][:4])
+                    for word in line[i + 1:i + len(tokens)]:
+                        rect |= fitz.Rect(word[:4])
+                    if not any(rect.intersects(old) for old in found):
+                        found.append(rect)
+    return found
 
 
 def detect(page, ocr=False):
@@ -91,22 +150,16 @@ def detect(page, ocr=False):
             textpage = page.get_textpage_ocr(dpi=200, full=True)
         except Exception as exc:
             return Placement(None, "review", f"OCR unavailable: {exc}")
-    anchors = []
-    for phrase in ANCHORS:
-        for r in page.search_for(phrase, textpage=textpage):
-            if not any(r.intersects(old) for old in anchors):
-                anchors.append(r)
+    anchors = stamp_labels(page, textpage)
     if len(anchors) != 1:
         return Placement(None, "review", "No unique stamp label found. Draw the stamp box in preview.")
     anchor = anchors[0]
     candidates = []
-    for drawing in page.get_drawings():
-        r = fitz.Rect(drawing["rect"])
-        if not (60 <= r.width <= 320 and 30 <= r.height <= 180):
-            continue
-        near_x = r.x0 - 30 <= anchor.x0 <= r.x1 + 30
-        near_y = r.y0 - 45 <= anchor.y0 <= r.y1 + 30
-        if near_x and near_y:
+    for r in vector_boxes(page):
+        label_left = 0 <= r.x0 - anchor.x1 <= 35 and r.y0 <= (anchor.y0 + anchor.y1) / 2 <= r.y1
+        label_above_below = (r.x0 - 30 <= anchor.x0 <= r.x1
+                            and r.y0 - 35 <= anchor.y0 <= r.y1 + 25)
+        if label_left or label_above_below:
             # A label inside a box gets its own reserved band.
             if r.intersects(anchor):
                 if anchor.y0 < r.y0 + r.height / 2:

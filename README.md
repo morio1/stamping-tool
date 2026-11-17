@@ -1,6 +1,6 @@
 # Cert Stamp Pro
 
-A local Python desktop tool for batch stamping certificate PDFs. Choose a folder of unstamped certificates, select your stamp image once, preview placement on any page, then export copies with the same filenames and regional subfolders.
+A local Python desktop tool for batch stamping certificate PDFs. Choose an extracted folder or import one or more ZIP batches, select your stamp image once, preview placement on any page, then export copies and an optional ZIP with the same filenames and regional subfolders.
 
 ## Start on Windows
 
@@ -16,16 +16,26 @@ py -m venv .venv
 
 ## Stamp certificates
 
-1. Browse to the certificate folder. Regional subfolders are included automatically.
+1. Browse to the certificate folder, or click **Import ZIP files** and select one or more ZIPs. ZIP batches are extracted and scanned automatically. Regional subfolders are preserved; multiple archives get separate top-level folders to avoid collisions.
 2. Choose an output folder and your PNG/JPG stamp. Transparent PNG gives the best result. White-background removal is optional; inspect its preview before exporting.
 3. Choose first, last, or all pages and click **Scan folder**.
-4. Select a certificate in the list. Use the page buttons to inspect each page. A green rectangle is ready; an amber rectangle needs review. The preview uses the same image insertion as the exported PDF.
+4. Select a certificate in the list. Use the page buttons to inspect each page. A green rectangle is ready; an amber rectangle needs review. A red occupied area may already contain a stamp and is skipped. Occupied pages show their original content without adding another stamp in preview.
 5. If placement needs correction, drag a rectangle over the intended area and click **Approve this area**. Approval applies only to that page of that PDF. Already stamped pages cannot be reapproved.
-6. Click **Stamp ready certificates**. PDFs with uncertain selected pages are skipped in full. A JSON report records each file's result, source/output SHA-256 hashes, placement decisions, and errors. Cancel stops between files.
+6. Leave **Also create ZIP** selected if you want a ZIP delivery bundle, then click **Stamp ready certificates**. PDFs with uncertain or occupied selected pages are skipped in full. A JSON report records each file's result, source/output SHA-256 hashes, placement decisions, and errors. The ZIP includes only this run's successful PDFs and report, not older files already in the output folder. Cancel stops between files, and is also checked while importing ZIP data.
 
-Automatic placement requires a unique recognized stamp label near a clear vector box. Supported labels include `College Stamp & Date`, `College Stamp`, `Stamp & Date`, and `Official Stamp`. Every page is analyzed independently. The tool does not infer positions from filenames, subject counts, or another page's coordinates.
+For already stamped batches, import the ZIP or choose its extracted folder, inspect the results, then click **Save review report**. No stamp image is needed to scan or save a review. Files marked `stamped` were marked by this tool; `occupied` means text, ink, or a possible external stamp was found in the box. This is not an authenticity check.
 
-Scanned PDFs can use optional local Tesseract OCR when its language data is installed. Without OCR or a recognizable box, draw and approve the area in preview. Dotted boxes represented as many separate line segments and unusual layouts may require manual placement. Detection cannot prove every certificate is unstamped: existing ink is a review signal, and automatic repeat detection identifies stamps applied by this tool.
+Automatic placement requires a unique recognized stamp label near a clear vector box, including a dotted box composed of four separate strokes. Labels may be to the left of, above, below, or inside the box. Supported labels include `College Stamp & Date`, `College Stamp`, `Stamp & Date`, and `Official Stamp`. Every page is analyzed independently. Tests cover certificates with one through seven units and deliberately varied box heights: the actual box determines placement, not the unit count, filename, or another page's coordinates.
+
+Scanned PDFs can use optional local Tesseract OCR when its language data is installed. Without OCR or a recognizable vector box, draw a clear area and approve it in preview. Boxes represented as disconnected tiny segments, raster images, and unusual layouts may require manual placement. Existing-stamp detection is conservative: ink can be flagged even when it is not a stamp, and very faint ink may be missed. Preview real certificates before a production batch.
+
+## Large batches and ZIPs
+
+PDFs are inspected and exported one at a time; previews load only the selected PDF. ZIP extraction and packaging use disk storage and streamed file reads, with ZIP64 support. The current import limit is 100,000 entries and 20 GiB of expanded PDF content per archive; sufficient local disk space is also required for extracted input, stamped output, and the ZIP bundle. These limits are safeguards, not a tested capacity guarantee. Nested ZIPs must be extracted separately. ZIP passwords, links, unsafe paths, duplicate PDF paths, and Windows-reserved filenames are rejected. Non-PDF archive entries are not imported.
+
+A synthetic 281-file mixed ZIP batch was tested locally: 252 PDFs were stamped, 28 occupied PDFs were skipped, and one damaged PDF was reported as an error. Import, analysis, export, and packaging took about 10 seconds on the test computer. Real performance depends on page count, PDF size, image resolution, OCR, and disk speed.
+
+Extracted ZIP inputs are temporary and cleaned when the source is changed or the app closes normally. Original ZIPs are never modified. Scan cancellation is shown as a partial checked count; rescan to process the full batch.
 
 ## Data and file handling
 
@@ -49,6 +59,8 @@ Choose `output/demo/certificates` and `output/demo/test-stamp.png` in the app. S
 
 ```powershell
 .\.venv\Scripts\python.exe cli.py "C:\Certificates" "C:\Stamped" --stamp "C:\Stamp.png" --pages all
+.\.venv\Scripts\python.exe cli.py "C:\Certificates.zip" "C:\Stamped" --stamp "C:\Stamp.png" --zip-output
+.\.venv\Scripts\python.exe cli.py "C:\Already-stamped.zip" "C:\Review" --review-only
 ```
 
 The command line exports only automatically ready placements. Exit status 2 means some PDFs were skipped or failed; inspect the report and use the desktop preview to review them.

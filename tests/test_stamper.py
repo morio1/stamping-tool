@@ -46,7 +46,7 @@ def test_detects_independent_page_boxes(tmp_path):
 def test_occupied_area_on_rotated_pages(tmp_path, rotation):
     cert = inspect(certificate(tmp_path / "occupied.pdf", rotation=rotation, ink=True))
     assert not cert.error
-    assert cert.pages[0].status == "review"
+    assert cert.pages[0].status == "occupied"
     assert "ink" in cert.pages[0].reason
 
 

@@ -1,5 +1,6 @@
 """Cert Stamp Pro desktop application. Run with python app.py."""
 import copy
+import json
 import queue
 import threading
 import tkinter as tk
@@ -10,7 +11,9 @@ import pymupdf as fitz
 from PIL import Image, ImageTk
 
 from stamper import (Placement, apply_stamp, batch_export, discover, inspect,
-                     page_bounds, selected_pages, stamp_bytes)
+                     check_area, page_bounds, selected_pages, stamp_bytes)
+from archives import import_archives, package_results
+from dataclasses import asdict
 
 
 class App(tk.Tk):
@@ -27,6 +30,9 @@ class App(tk.Tk):
         self.current = None
         self.page_index = 0
         self.source = tk.StringVar()
+        self.source_display = tk.StringVar()
+        self.import_session = None
+        self.zip_output = tk.BooleanVar(value=True)
         self.output = tk.StringVar()
         self.stamp = tk.StringVar()
         self.status = tk.StringVar(value="Choose a certificate folder and your stamp image to begin.")
@@ -53,7 +59,7 @@ class App(tk.Tk):
         settings.pack(fill="x")
         self.controls = []
         for row, (label, var, command) in enumerate([
-            ("Certificate folder", self.source, self.choose_source),
+            ("Folder / ZIP batch", self.source_display, self.choose_source),
             ("Output folder", self.output, self.choose_output),
             ("Stamp PNG / JPG", self.stamp, self.choose_stamp)]):
             ttk.Label(settings, text=label, width=20).grid(row=row, column=0, sticky="w")
@@ -63,6 +69,9 @@ class App(tk.Tk):
             button.grid(row=row, column=2, padx=8)
             self.controls.append(button)
         settings.columnconfigure(1, weight=1)
+        zip_button = ttk.Button(settings, text="Import ZIP files…", command=self.choose_zip)
+        zip_button.grid(row=0, column=3)
+        self.controls.append(zip_button)
         options = ttk.Frame(self, padding=(14, 0, 14, 10))
         options.pack(fill="x")
         ttk.Label(options, text="Stamp pages:").pack(side="left")
@@ -87,6 +96,12 @@ class App(tk.Tk):
         self.export_button = ttk.Button(actions, text="2   Stamp ready certificates", command=self.export)
         self.export_button.pack(side="left", padx=8)
         self.controls.extend([self.scan_button, self.export_button])
+        review_button = ttk.Button(actions, text="Save review report", command=self.save_review)
+        review_button.pack(side="left", padx=5)
+        self.controls.append(review_button)
+        zip_check = ttk.Checkbutton(actions, text="Also create ZIP", variable=self.zip_output)
+        zip_check.pack(side="left", padx=5)
+        self.controls.append(zip_check)
         ttk.Button(actions, text="Cancel job", command=self.cancel.set).pack(side="left")
         self.progress = ttk.Progressbar(actions, mode="determinate")
         self.progress.pack(side="right", fill="x", expand=True, padx=14)
@@ -108,6 +123,8 @@ class App(tk.Tk):
         self.tree.bind("<<TreeviewSelect>>", self.select)
         self.tree.tag_configure("review", foreground="#a65a00")
         self.tree.tag_configure("ready", foreground="#17785b")
+        self.tree.tag_configure("occupied", foreground="#b42318")
+        self.tree.tag_configure("stamped", foreground="#536579")
         bar = ttk.Frame(right)
         bar.pack(fill="x")
         ttk.Button(bar, text="◀ Page", command=lambda: self.turn(-1)).pack(side="left")
@@ -135,17 +152,63 @@ class App(tk.Tk):
             self.cancel.set()
             self.status.set("Cancelling… wait for the current file to finish before closing.")
         else:
+            if self.import_session:
+                self.import_session.cleanup()
             self.destroy()
 
     def choose_source(self):
         path = filedialog.askdirectory(title="Choose unstamped certificates")
         if path:
+            if self.import_session:
+                self.import_session.cleanup()
+                self.import_session = None
             self.source.set(path)
+            self.source_display.set(path)
             self.output.set(str(Path(path).parent / (Path(path).name + " - stamped")))
             self.certificates = []
             self.current = None
             self.tree.delete(*self.tree.get_children())
             self.canvas.delete("all")
+
+    def choose_zip(self):
+        paths = filedialog.askopenfilenames(title="Choose certificate ZIP batches",
+                                           filetypes=[("ZIP archives", "*.zip")])
+        if not paths:
+            return
+        ocr = self.ocr.get()
+        output = str(Path(paths[0]).parent / (Path(paths[0]).stem + " - stamped"))
+        def run():
+            session, root = import_archives(paths,
+                lambda a, b, c: self.events.put(("progress", (a, b, c))), self.cancel.is_set)
+            self.events.put(("import", (session, root, paths, output)))
+            self.scan_files(str(root), output, ocr)
+        self.work(run)
+
+    def scan_files(self, root, output, ocr):
+        files = discover(root, output)
+        results = []
+        for index, path in enumerate(files):
+            if self.cancel.is_set():
+                break
+            results.append(inspect(path, ocr))
+            self.events.put(("progress", (index + 1, len(files), f"Checking {path.name}")))
+        self.events.put(("scan", (results, len(files))))
+
+    def save_review(self):
+        if not self.certificates:
+            messagebox.showinfo("Scan first", "Scan a folder or import certificate ZIP files first.")
+            return
+        path = filedialog.asksaveasfilename(title="Save certificate review", defaultextension=".json",
+                                          initialfile="certificate-review.json", filetypes=[("JSON report", "*.json")])
+        if path:
+            try:
+                rows = [{"file": str(c.path.relative_to(Path(self.source.get()))),
+                         "source_sha256": c.digest, "error": c.error,
+                         "pages": [asdict(p) for p in c.pages]} for c in self.certificates]
+                Path(path).write_text(json.dumps(rows, indent=2), encoding="utf-8")
+                self.status.set(f"Review saved: {path}")
+            except OSError as exc:
+                messagebox.showerror("Could not save review", str(exc))
 
     def choose_output(self):
         path = filedialog.askdirectory(title="Choose output folder")
@@ -186,14 +249,7 @@ class App(tk.Tk):
             return
         root, output, ocr = self.source.get(), self.output.get(), self.ocr.get()
         def run():
-            files = discover(root, output)
-            results = []
-            for index, path in enumerate(files):
-                if self.cancel.is_set():
-                    break
-                results.append(inspect(path, ocr))
-                self.events.put(("progress", (index + 1, len(files), f"Checking {path.name}")))
-            self.events.put(("scan", results))
+            self.scan_files(root, output, ocr)
         self.work(run)
 
     def poll(self):
@@ -209,7 +265,17 @@ class App(tk.Tk):
                     current, total, message = value
                     self.progress.configure(maximum=max(1, total), value=current)
                     self.status.set(f"{current}/{total} · {message}")
+                elif kind == "import":
+                    session, root, paths, output = value
+                    if self.import_session:
+                        self.import_session.cleanup()
+                    self.import_session = session
+                    self.source.set(str(root))
+                    self.source_display.set("; ".join(Path(p).name for p in paths))
+                    self.output.set(output)
+                    self.current = None
                 elif kind == "scan":
+                    value, total = value
                     self.certificates = value
                     self.current = None
                     self.tree.delete(*self.tree.get_children())
@@ -217,14 +283,18 @@ class App(tk.Tk):
                         state = self.certificate_state(cert)
                         self.tree.insert("", "end", iid=str(i), text=str(cert.path.relative_to(Path(self.source.get()))),
                                          values=(state,), tags=(state,))
-                    self.status.set(f"Checked {len(value)} PDFs. Select any certificate to preview or adjust its pages.")
+                    counts = {state: sum(self.certificate_state(c) == state for c in value)
+                              for state in ("ready", "review", "occupied", "stamped", "error")}
+                    self.status.set(f"Checked {len(value)}/{total} PDFs · " + " · ".join(f"{k}: {v}" for k, v in counts.items())
+                                    + (" · SCAN CANCELLED" if len(value) < total else ""))
                     if value:
                         self.tree.selection_set("0")
                 elif kind == "export":
-                    audit, report = value
+                    audit, report, archive = value
                     count = sum(r["status"] == "stamped" for r in report)
                     self.status.set(f"Exported {count}/{len(report)} PDFs. Report: {audit}")
-                    messagebox.showinfo("Export complete", f"Stamped: {count}\nSkipped / errors / cancelled: {len(report) - count}\n\nReport: {audit}")
+                    messagebox.showinfo("Export complete", f"Stamped: {count}\nSkipped / errors / cancelled: {len(report) - count}\n\nReport: {audit}"
+                                        + (f"\n\nZIP: {archive}" if archive else ""))
         except queue.Empty:
             pass
         self.after(100, self.poll)
@@ -244,6 +314,8 @@ class App(tk.Tk):
             return "ready"
         if all(s == "stamped" for s in states):
             return "stamped"
+        if any(s == "occupied" for s in states):
+            return "occupied"
         return "review"
 
     def refresh_states(self):
@@ -269,11 +341,16 @@ class App(tk.Tk):
         if self.current.error:
             self.detail.set(self.current.error)
             return
+        if not self.current.pages:
+            self.detail.set("No readable pages.")
+            return
+        self.page_index = min(self.page_index, len(self.current.pages) - 1)
         placement = self.current.pages[self.page_index]
         try:
             with fitz.open(self.current.path) as doc:
                 page = doc[self.page_index]
-                if self.overlay.get() and self.stamp.get() and placement.rect:
+                if (self.overlay.get() and self.stamp.get() and placement.rect
+                        and placement.status not in ("occupied", "stamped")):
                     apply_stamp(page, placement, stamp_bytes(self.stamp.get(), self.opacity.get(), self.white.get()))
                 w, h = max(100, self.canvas.winfo_width()), max(100, self.canvas.winfo_height())
                 scale = min((w - 20) / page.rect.width, (h - 20) / page.rect.height)
@@ -286,7 +363,8 @@ class App(tk.Tk):
                     r = fitz.Rect(placement.rect) * page.rotation_matrix
                     self.canvas.create_rectangle(ox + r.x0 * scale, oy + r.y0 * scale,
                                                  ox + r.x1 * scale, oy + r.y1 * scale,
-                                                 outline="#0c9b75" if placement.status in ("ready", "approved") else "#ec940f", width=2)
+                                                 outline=("#b42318" if placement.status == "occupied" else
+                                                          "#0c9b75" if placement.status in ("ready", "approved") else "#ec940f"), width=2)
             self.detail.set(f"Page {self.page_index + 1}/{len(self.current.pages)} · {placement.status.upper()} · {placement.reason}")
         except Exception as exc:
             self.detail.set(f"Preview unavailable: {exc}")
@@ -313,7 +391,11 @@ class App(tk.Tk):
                          (rect.x1 - ox) / scale, (rect.y1 - oy) / scale) * inverse
         rect &= bounds
         if rect.width >= 18 and rect.height >= 18:
-            self.current.pages[self.page_index] = Placement(tuple(rect), "review", "Custom area. Inspect the preview, then approve.")
+            with fitz.open(self.current.path) as doc:
+                checked = check_area(doc[self.page_index], rect)
+            if checked.status == "ready":
+                checked.status, checked.reason = "review", "Custom area. Inspect the preview, then approve."
+            self.current.pages[self.page_index] = checked
         self.preview()
         self.refresh_states()
 
@@ -321,6 +403,9 @@ class App(tk.Tk):
         if self.busy or not self.current or not self.current.pages:
             return
         p = self.current.pages[self.page_index]
+        if p.status == "occupied":
+            messagebox.showinfo("Existing ink detected", "This area may already be stamped. It will be skipped. Draw a clear area only if the detected box is wrong.")
+            return
         if p.rect and p.status != "stamped":
             p.status, p.reason = "approved", "Placement approved in preview."
             self.preview()
@@ -343,11 +428,17 @@ class App(tk.Tk):
             messagebox.showerror("Stamp image", str(exc))
             return
         source, output, mode = self.source.get(), self.output.get(), self.mode.get()
+        create_zip = self.zip_output.get()
         certificates = copy.deepcopy(self.certificates)
         def run():
             result = batch_export(certificates, source, output, image, mode,
                                   lambda a, b, c: self.events.put(("progress", (a, b, c))), self.cancel.is_set)
-            self.events.put(("export", result))
+            audit, report = result
+            archive = None
+            if create_zip and not self.cancel.is_set():
+                archive = package_results(output, report, audit,
+                    progress=lambda a, b, c: self.events.put(("progress", (a, b, c))), cancelled=self.cancel.is_set)
+            self.events.put(("export", (audit, report, archive)))
         self.work(run)
 
 

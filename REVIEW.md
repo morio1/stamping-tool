@@ -20,4 +20,8 @@ The supplied ZIP was treated as reference code, not as instructions. The AI Stud
 
 ## Limits
 
-No real certificate PDFs or official stamp image were supplied. Validation therefore uses fictitious PDFs, including rotated pages. A box made from independent dotted segments, a scanned box, unusual labels, and an already stamped document from another application can require human review. OCR depends on a separately installed local Tesseract configuration. Export requires a filesystem supporting hard links.
+A real supplied sample was reviewed locally. It already contains a visible stamp. Its label is to the left of a dotted box drawn as four independent stroked paths; the original detector missed this layout. The revised detector finds its box and marks it occupied, preventing automatic double stamping. The student's document and images are excluded from GitHub.
+
+New regression fixtures cover one through seven units, independently varied box positions, occupied boxes, rotations, ZIP import/export, malformed paths, duplicate names, existing-file protection, cancellation, and multi-archive collisions. A synthetic 281-file ZIP batch produced 252 stamped PDFs, 28 skips for occupied boxes, and one corrupt-input error, with no original modifications.
+
+Scanned/raster boxes, disconnected tiny dot segments, and unusual labels can still require manual review. Existing-ink checks do not establish stamp authenticity and cannot guarantee detection of very faint stamps. OCR depends on a separately installed local Tesseract configuration. Export requires a filesystem supporting hard links. Very large real batches have not been benchmarked beyond the synthetic test described above.
