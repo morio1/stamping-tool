@@ -32,6 +32,8 @@ class App(tk.Tk):
         self.source = tk.StringVar()
         self.source_display = tk.StringVar()
         self.import_session = None
+        self.email_window = None
+        self.last_audit = ""
         self.zip_output = tk.BooleanVar(value=True)
         self.output = tk.StringVar()
         self.stamp = tk.StringVar()
@@ -58,7 +60,7 @@ class App(tk.Tk):
         header.pack(fill="x")
         tk.Label(header, text="CERT STAMP PRO", bg="#102a43", fg="white",
                  font=("Segoe UI", 22, "bold")).pack(anchor="w")
-        tk.Label(header, text="Select a folder. Check the placement. Export stamped copies.",
+        tk.Label(header, text="Developed by Willy Wanjau  |  github.com/morio1  |  Preview and batch export",
                  bg="#102a43", fg="#b9d9ed", font=("Segoe UI", 11)).pack(anchor="w")
         settings = ttk.Frame(self, padding=14)
         settings.pack(fill="x")
@@ -81,7 +83,7 @@ class App(tk.Tk):
         module_bar = ttk.Frame(self, padding=(14, 0, 14, 8))
         module_bar.pack(fill="x")
         ttk.Label(module_bar, text="Module:").pack(side="left")
-        modules = ttk.Combobox(module_bar, textvariable=self.operation, values=("stamp", "signature"),
+        modules = ttk.Combobox(module_bar, textvariable=self.operation, values=("stamp", "blank-space", "signature"),
                                state="readonly", width=12)
         modules.pack(side="left", padx=8)
         modules.bind("<<ComboboxSelected>>", lambda event: self.reset_analysis())
@@ -115,6 +117,9 @@ class App(tk.Tk):
                                        variable=self.require_approval, command=self.refresh_states)
         review_option.pack(side="left", padx=8)
         self.controls.append(review_option)
+        email_button = ttk.Button(approval_bar, text="Email reviewed certificates…", command=self.open_email)
+        email_button.pack(side="right")
+        self.controls.append(email_button)
         actions = ttk.Frame(self, padding=(14, 0, 14, 10))
         actions.pack(fill="x")
         self.scan_button = ttk.Button(actions, text="1   Scan folder", command=self.scan)
@@ -180,6 +185,10 @@ class App(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self.close)
 
     def close(self):
+        if self.email_window and self.email_window.winfo_exists() and self.email_window.busy:
+            self.email_window.cancel.set()
+            self.status.set("Stopping email delivery after the current message. Wait before closing.")
+            return
         if self.busy:
             self.cancel.set()
             self.status.set("Cancelling… wait for the current file to finish before closing.")
@@ -276,7 +285,7 @@ class App(tk.Tk):
         self.canvas.delete("all")
         self.update_summary()
         self.detail.set("Field settings changed. Scan again to check this module's placement.")
-        self.status.set("Choose the matching image and scan again. Signature mode applies a visible image only.")
+        self.status.set("Choose the matching image and scan again. Blank-space mode searches for clear space; signature mode applies a visible image.")
 
     def turn_certificate(self, amount):
         items = self.tree.get_children()
@@ -361,6 +370,7 @@ class App(tk.Tk):
                     self.update_summary()
                 elif kind == "export":
                     audit, report, archive = value
+                    self.last_audit = str(audit)
                     count = sum(r["status"] in ("stamped", "signed") for r in report)
                     self.status.set(f"Exported {count}/{len(report)} PDFs. Report: {audit}")
                     self.update_summary()
@@ -376,6 +386,15 @@ class App(tk.Tk):
             self.current = self.certificates[int(selected[0])]
             self.page_index = 0
             self.preview()
+
+    def open_email(self):
+        if self.busy:
+            return
+        if self.email_window and self.email_window.winfo_exists():
+            self.email_window.lift()
+            return
+        from email_ui import EmailWindow
+        self.email_window = EmailWindow(self, self.output.get(), self.last_audit)
 
     def certificate_state(self, cert):
         if cert.error:

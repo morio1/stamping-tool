@@ -197,7 +197,7 @@ def detect(page, ocr=False, labels=None):
 def inspect(path, ocr=False, operation="stamp", label=None):
     path = Path(path)
     try:
-        if operation not in ("stamp", "signature"):
+        if operation not in ("stamp", "signature", "blank-space"):
             raise ValueError("Unknown certificate operation")
         before = digest(path)
         with fitz.open(path) as doc:
@@ -207,7 +207,10 @@ def inspect(path, ocr=False, operation="stamp", label=None):
                 raise ValueError("Empty PDF")
             if doc.get_sigflags() > 0:
                 raise ValueError("Digitally signed PDF: stamping would invalidate signatures")
-            if operation == "signature":
+            if operation == "blank-space":
+                from blank_space import detect_blank_space
+                pages = [detect_blank_space(page) for page in doc]
+            elif operation == "signature":
                 from signatures import detect_signature
                 pages = [detect_signature(page, ocr, label) for page in doc]
             else:

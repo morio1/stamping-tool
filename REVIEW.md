@@ -26,6 +26,12 @@ Signature validation uses synthetic fixtures, including rotations, multiple sign
 
 ## Validation and limits
 
+Blank-space mode is a separate opt-in operation. It searches for a buffered, word-free and visibly clear region rather than silently falling back from a failed stamp-field detection. Tests cover raster content avoidance, no-clear-region refusal, page rotations and desktop preview. A 1,000-file no-field synthetic benchmark processed every file in 33.41 seconds, verifying overlays, source integrity and ZIP contents. A separate 1,000-file signature benchmark passed in 31.31 seconds with the same integrity checks. Neither proves aesthetic suitability or coverage of every real template.
+
+The Gmail module uses reviewed CSV-to-output-PDF mappings and successful export hashes, one recipient and attachment per message, verified TLS, in-memory credentials and an append-only send journal. An interrupted/uncertain attempt is blocked from automatic retry. Tests use a fake mail server; no real email or Gmail authentication was performed. Delivery acceptance is not confirmation of inbox receipt, and account-specific quotas still apply.
+
+The release builder explicitly includes only runtime modules and guides in the Live Stamping package. Development material and private email/certificate files are excluded. Willy Wanjau's attribution is shown in the app and repository, not inserted into certificates.
+
 A later 1,000-clear-certificate benchmark covered 1-7 subjects, independently varied stamp-box positions, two field-label styles and four page rotations. The first run correctly sent 200 short-label layouts to review rather than guessing. Detection was extended to associate a shorter left-hand seal label across a bounded, box-relative gap. The rerun stamped all 1,000 fixtures, verified every image stayed in its detected area, checked original hashes, text/page rotations and ZIP integrity, and completed in 36.59 seconds including verification. A new regression test covers that label spacing.
 
 Preflight now counts every document before export, including occupied/review cases and existing outputs. The benchmark is reproducible under `benchmarks/mixed_batch.py`. Real performance and layout coverage still depend on the actual input documents.

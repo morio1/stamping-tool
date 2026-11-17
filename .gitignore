@@ -9,3 +9,8 @@ output/
 *.jpg
 audit-*.json
 *.zip
+/Live Stamping/
+recipients*.csv
+email-delivery.jsonl
+.email-send.lock
+*.eml

@@ -16,7 +16,7 @@ def main():
     images = parser.add_mutually_exclusive_group()
     images.add_argument("--stamp", type=Path, help="PNG or JPG stamp (not needed for review-only)")
     images.add_argument("--signature", type=Path, help="PNG or JPG visible signature image")
-    parser.add_argument("--module", choices=("stamp", "signature"), help="Module for review-only; otherwise inferred from image")
+    parser.add_argument("--module", choices=("stamp", "blank-space", "signature"), help="Placement module; otherwise inferred from image")
     parser.add_argument("--field-label", help="Exact stamp label or intended signatory role on the certificate")
     parser.add_argument("--pages", choices=("first", "last", "all"), default="first")
     parser.add_argument("--opacity", type=float, default=0.9)
@@ -26,7 +26,7 @@ def main():
     parser.add_argument("--review-only", action="store_true", help="Analyze without stamping; save a JSON review report")
     args = parser.parse_args()
     operation = args.module or ("signature" if args.signature else "stamp")
-    if (operation == "signature" and args.stamp) or (operation == "stamp" and args.signature):
+    if (operation == "signature" and args.stamp) or (operation != "signature" and args.signature):
         parser.error("The image type and selected module must match")
     session = None
     try:

@@ -17,6 +17,7 @@ from stamper import batch_export, batch_preflight, digest, discover, inspect, st
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--count", type=int, default=1000)
+    parser.add_argument("--module", choices=("stamp", "signature", "blank-space"), default="stamp")
     parser.add_argument("--workdir", type=Path, default=Path("output/benchmarks"))
     args = parser.parse_args()
     if args.count < 1:
@@ -35,16 +36,24 @@ def main():
             page.insert_text((60, 50), "SYNTHETIC CERTIFICATE - TEST DATA ONLY", fontsize=16)
             for n in range(units):
                 page.insert_text((80, 90 + n * 15), f"9101/{101+n} SAMPLE SUBJECT", fontsize=8)
-            label = "Official Seal:" if i % 5 == 0 else "College Stamp & Date:"
-            page.insert_text((x - 90, y + 40), label, fontsize=7)
-            for a, b in [((x, y), (x+182, y)), ((x, y+73), (x+182, y+73)),
-                         ((x, y), (x, y+73)), ((x+182, y), (x+182, y+73))]:
-                page.draw_line(a, b, dashes="[.73 1.45] .73", width=.73)
+            if args.module != "blank-space":
+                label = "Official Seal:" if i % 5 == 0 else "College Stamp & Date:"
+                page.insert_text((x - 90, y + 40), label, fontsize=7)
+                for a, b in [((x, y), (x+182, y)), ((x, y+73), (x+182, y+73)),
+                             ((x, y), (x, y+73)), ((x+182, y), (x+182, y+73))]:
+                    page.draw_line(a, b, dashes="[.73 1.45] .73", width=.73)
             page.set_rotation((i % 4) * 90)
+            if args.module == "signature":
+                line_y = 430 + (i * 11) % 70
+                page.draw_line((480, line_y), (690, line_y), width=.7)
+                page.insert_text((540, line_y + 20), "Principal", fontsize=9)
             doc.save(folder / f"certificate-{i:04}.pdf")
     image = Image.new("RGBA", (400, 140), (0, 0, 0, 0))
     pen = ImageDraw.Draw(image)
-    pen.rectangle((4, 4, 395, 135), outline="#124bac", width=5)
+    if args.module == "signature":
+        pen.line([(15,95), (75,20), (55,100), (140,45), (170,85), (260,30), (380,65)], fill="#124bac", width=4)
+    else:
+        pen.rectangle((4, 4, 395, 135), outline="#124bac", width=5)
     pen.text((150, 60), "TEST ONLY", fill="#124bac")
     image.save(root / "test-stamp.png")
     archive = root / "input.zip"
@@ -54,15 +63,18 @@ def main():
     started = time.perf_counter()
     session, imported = import_archives([archive])
     try:
-        certs = [inspect(path) for path in discover(imported)]
-        preflight = batch_preflight(certs, imported, root / "stamped")
+        certs = [inspect(path, operation=args.module, label="Principal" if args.module == "signature" else None)
+                 for path in discover(imported)]
+        output = root / ("signed" if args.module == "signature" else "stamped")
+        preflight = batch_preflight(certs, imported, output)
         assert preflight["ready"] == args.count, preflight
-        audit, report = batch_export(certs, imported, root / "stamped", stamp_bytes(root / "test-stamp.png"))
-        result = package_results(root / "stamped", report, audit)
-        assert len(report) == args.count and all(r["status"] == "stamped" for r in report)
+        audit, report = batch_export(certs, imported, output, stamp_bytes(root / "test-stamp.png"))
+        result = package_results(output, report, audit)
+        expected = "signed" if args.module == "signature" else "stamped"
+        assert len(report) == args.count and all(r["status"] == expected for r in report)
         for cert in certs:
             assert digest(cert.path) == cert.digest
-            target = root / "stamped" / cert.path.relative_to(imported)
+            target = output / cert.path.relative_to(imported)
             with fitz.open(cert.path) as original, fitz.open(target) as stamped:
                 assert len(stamped) == len(original)
                 assert stamped[0].rotation == original[0].rotation
@@ -73,8 +85,8 @@ def main():
                 assert allowed.contains(fitz.Rect(images[0]["bbox"]))
         with zipfile.ZipFile(result) as zipped:
             assert len(zipped.namelist()) == args.count + 1 and zipped.testzip() is None
-        summary = {"synthetic_certificates": args.count, "units": "1-7", "rotations": [0,90,180,270],
-                   "stamped": args.count, "originals_unchanged": True,
+        summary = {"synthetic_certificates": args.count, "module": args.module, "units": "1-7", "rotations": [0,90,180,270],
+                   expected: args.count, "originals_unchanged": True,
                    "all_overlay_bounds_verified": True,
                    "seconds_including_verification": round(time.perf_counter() - started, 2)}
         (root / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")

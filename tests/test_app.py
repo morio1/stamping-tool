@@ -85,6 +85,8 @@ def test_signature_preview_approval_and_zip_export(tmp_path, stamp, desktop_wind
     window.operation.set("signature")
     window.field_label.set("Principal")
     window.reset_analysis()
+
+
     source = tmp_path / "input"
     path = signature_certificate(source / "a.pdf")
     image = tmp_path / "signature.png"
@@ -117,3 +119,38 @@ def test_signature_preview_approval_and_zip_export(tmp_path, stamp, desktop_wind
     window.field_label.set("")
     window.require_approval.set(False)
     window.reset_analysis()
+
+
+@pytest.mark.skipif(os.name != "nt" and not os.environ.get("DISPLAY"), reason="Desktop display required")
+def test_blank_space_module_preview(tmp_path, stamp, desktop_window):
+    import pymupdf as fitz
+    window = desktop_window
+    window.operation.set("blank-space")
+    window.reset_analysis()
+
+
+    path = tmp_path / "certificate.pdf"
+    with fitz.open() as doc:
+        page = doc.new_page()
+        page.insert_text((60, 100), "CERTIFICATE WITHOUT A STAMP FIELD", fontsize=12)
+        doc.save(path)
+    image = tmp_path / "stamp.png"
+    image.write_bytes(stamp)
+    window.stamp.set(str(image))
+    window.current = inspect(path, operation="blank-space")
+    window.preview()
+    assert window.current.pages[0].status == "ready"
+    assert window.render_context is not None, window.detail.get()
+    window.operation.set("stamp")
+    window.reset_analysis()
+
+
+@pytest.mark.skipif(os.name != "nt" and not os.environ.get("DISPLAY"), reason="Desktop display required")
+def test_email_workspace_opens_without_connecting(desktop_window):
+    window = desktop_window
+    window.open_email()
+    assert window.email_window.winfo_exists()
+    assert not window.email_window.busy and window.email_window.plan == []
+    assert window.email_window.password.get() == ""
+    window.email_window.destroy()
+    window.email_window = None

@@ -1,6 +1,18 @@
 # Cert Stamp Pro
 
+**Developed and maintained by [Willy Wanjau (@morio1)](https://github.com/morio1).**
+
+For the clean operational download, use the **Live Stamping ZIP** on the [Releases page](https://github.com/morio1/stamping-tool/releases/latest). Extract it and double-click `Live Stamping/start.bat`. The source repository also includes development tests and verification tools; they are intentionally excluded from the operational ZIP.
+
 A local Python desktop tool with separate modules for batch stamping and visible signature images on certificate PDFs. Choose an extracted folder or import one or more ZIP batches, select your image once, preview placement on any page, then export copies and an optional ZIP with the same filenames and regional subfolders.
+
+Choose `stamp` for a labelled stamp box, `blank-space` for a certificate with no designated stamp field, or `signature` for a labelled signature line. Read the detailed [modules and export guide](MODULES_AND_EXPORTS.md) for each workflow, a 1,000-certificate signature batch, and exactly what the PDF/ZIP/report exports contain.
+
+For day-to-day use, run `python build_release.py` and use the clean **Live Stamping** folder or **stamping-tool-live.zip** it creates. This operational package includes only application files and user guides; development tests, generated data and private delivery files are excluded. See [the repository guide](REPOSITORY_GUIDE.md) for every source file and folder.
+
+Blank-space mode requires a clear region with no detected words or visible marks in its buffered area. It never erases content to make room. Preview is needed to judge visual suitability, especially around decorative certificate borders or watermarks. If nothing sufficiently clear is found, the document is sent to review.
+
+After processing and reviewing the final PDFs, use **Email reviewed certificates** for Gmail/Workspace delivery. A recipient CSV is matched against successful output hashes; messages and attachments are previewed before an explicit reviewed send. Passwords are kept in memory. Read [the Gmail guide](EMAIL_GUIDE.md) for eligible app-password setup, account limits, recipient mapping, duplicate protection and recovery. No real emails were sent during development tests.
 
 ## Start on Windows
 
@@ -57,6 +69,8 @@ PDFs are inspected and exported one at a time; previews load only the selected P
 A synthetic 281-file mixed ZIP batch was tested locally: 252 PDFs were stamped, 28 occupied PDFs were skipped, and one damaged PDF was reported as an error. Import, analysis, export, and packaging took about 10 seconds on the test computer. Real performance depends on page count, PDF size, image resolution, OCR, and disk speed.
 
 A separate 1,000-file synthetic ZIP benchmark with 1-7 units, independently varied box positions, stamp/seal labels and all four rotations exported all 1,000 clear certificates. Every overlay's bounds and original-file hash were verified, along with retained text and page rotations. Import, processing, packaging and verification took 36.59 seconds locally. These were small synthetic PDFs; this is not a timing or correctness guarantee for 1,000 real certificates. Run `python benchmarks/mixed_batch.py --count 1000` to reproduce the checks with fresh synthetic files.
+
+The signature module was separately tested with 1,000 synthetic certificates: all 1,000 signed with verified bounds, retained text/rotations and unchanged originals in 31.31 seconds including packaging and verification. Blank-space mode was tested on 1,000 synthetic PDFs without stamp fields: all 1,000 processed with the same output checks in 33.41 seconds. Reproduce with `--module signature` or `--module blank-space`. These are test fixtures, not production performance guarantees.
 
 The desktop now shows a preflight summary of ready, review, occupied, already-applied, error and existing-output counts. Read [the batch guide](BATCH_GUIDE.md) for a step-by-step 1,000-file workflow and suggested future improvements.
 
