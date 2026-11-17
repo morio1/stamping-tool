@@ -14,7 +14,9 @@ import pymupdf as fitz
 from PIL import Image
 
 MARKER = "CertStampPro:v1"
-ANCHORS = ("College Stamp & Date", "College Stamp", "Stamp & Date", "Official Stamp")
+SIGNATURE_MARKER = "CertSignaturePro:v1"
+ANCHORS = ("College Stamp & Date", "College Stamp", "Stamp & Date", "Official Stamp",
+           "Institution Stamp", "School Stamp", "Official Seal", "Seal", "Stamp")
 
 
 @dataclass
@@ -22,6 +24,7 @@ class Placement:
     rect: tuple | None
     status: str
     reason: str
+    kind: str = "stamp"
 
 
 @dataclass
@@ -30,6 +33,7 @@ class Certificate:
     digest: str
     pages: list[Placement]
     error: str = ""
+    operation: str = "stamp"
 
 
 def digest(path):
@@ -53,7 +57,7 @@ def stamp_bytes(path, opacity=0.9, remove_white=False):
         pixels.append((r, g, b, round(a * opacity)))
     image.putdata(pixels)
     if image.getbbox() is None:
-        raise ValueError("The selected stamp image is entirely transparent.")
+        raise ValueError("The selected image is entirely transparent.")
     image = image.crop(image.getbbox())
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
@@ -64,13 +68,16 @@ def page_bounds(page):
     return page.rect * page.derotation_matrix
 
 
-def check_area(page, rect):
+def check_area(page, rect, ignore_underline=False):
     bounds = page_bounds(page)
     if rect.is_empty or rect.width < 18 or rect.height < 18 or not bounds.contains(rect):
         return Placement(None, "review", "Stamp box is too small or outside the page.")
     # Text in the proposed interior is never silently covered.
     interior = fitz.Rect(rect.x0 + 4, rect.y0 + 4, rect.x1 - 4, rect.y1 - 4)
-    if page.get_textbox(interior).strip():
+    text = page.get_textbox(interior).strip()
+    if ignore_underline:
+        text = text.replace("_", "").strip()
+    if text:
         return Placement(tuple(rect), "occupied", "Existing text or stamp occupies the box. Skipped to prevent covering it.")
     pix = page.get_pixmap(matrix=fitz.Matrix(1, 1), clip=interior * page.rotation_matrix,
                           colorspace=fitz.csRGB, alpha=False)
@@ -80,18 +87,20 @@ def check_area(page, rect):
     coloured = sum(max(data[i:i + 3]) - min(data[i:i + 3]) > 45
                    and min(data[i:i + 3]) < 190 for i in range(0, len(data), 3)) / total
     if dark > 0.025 or coloured > 0.004:
-        return Placement(tuple(rect), "occupied", "Possible existing stamp or ink in the box. Skipped to prevent double stamping.")
+        return Placement(tuple(rect), "occupied", "Possible existing stamp, signature or other ink in the field. Skipped to prevent overlap.")
     return Placement(tuple(rect), "ready", "Label and empty stamp box detected.")
 
 
 def vector_boxes(page):
     """Recognize closed paths AND boxes drawn as four independent dotted strokes."""
     boxes, horizontal, vertical = [], [], []
+    max_width = min(600, page_bounds(page).width * 0.8)
+    max_height = min(260, page_bounds(page).height * 0.45)
     for drawing in page.get_drawings():
         if drawing.get("type") not in ("s", "fs"):
             continue
         rect = fitz.Rect(drawing["rect"])
-        if 60 <= rect.width <= 320 and 30 <= rect.height <= 180:
+        if 40 <= rect.width <= max_width and 24 <= rect.height <= max_height:
             # A path bounding box alone is not proof of a rectangle.
             items = drawing.get("items", [])
             if any(item[0] == "re" for item in items):
@@ -100,13 +109,13 @@ def vector_boxes(page):
             if item[0] != "l":
                 continue
             a, b = item[1:3]
-            if abs(a.y - b.y) < 1 and 60 <= abs(a.x - b.x) <= 320:
+            if abs(a.y - b.y) < 1 and 40 <= abs(a.x - b.x) <= max_width:
                 horizontal.append((min(a.x, b.x), max(a.x, b.x), (a.y + b.y) / 2))
-            if abs(a.x - b.x) < 1 and 30 <= abs(a.y - b.y) <= 180:
+            if abs(a.x - b.x) < 1 and 24 <= abs(a.y - b.y) <= max_height:
                 vertical.append(((a.x + b.x) / 2, min(a.y, b.y), max(a.y, b.y)))
     for x0, x1, top in horizontal:
         for bx0, bx1, bottom in horizontal:
-            if not (30 <= bottom - top <= 180 and abs(x0 - bx0) <= 3 and abs(x1 - bx1) <= 3):
+            if not (24 <= bottom - top <= max_height and abs(x0 - bx0) <= 3 and abs(x1 - bx1) <= 3):
                 continue
             sides = [x for x, y0, y1 in vertical if abs(y0 - top) <= 3 and abs(y1 - bottom) <= 3]
             if any(abs(x - x0) <= 3 for x in sides) and any(abs(x - x1) <= 3 for x in sides):
@@ -118,7 +127,7 @@ def vector_boxes(page):
     return unique
 
 
-def stamp_labels(page, textpage=None):
+def stamp_labels(page, textpage=None, labels=None):
     """Use word positions, tolerating nonstandard space glyphs in certificate PDFs."""
     import re
     words = page.get_text("words", textpage=textpage)
@@ -129,8 +138,8 @@ def stamp_labels(page, textpage=None):
     for line in lines.values():
         line.sort(key=lambda w: w[0])
         normalized = [re.sub(r"[^a-z&]", "", w[4].lower()) for w in line]
-        for phrase in ANCHORS:
-            tokens = phrase.lower().split()
+        for phrase in labels or ANCHORS:
+            tokens = [re.sub(r"[^a-z&]", "", t) for t in phrase.lower().split()]
             for i in range(len(line) - len(tokens) + 1):
                 if normalized[i:i + len(tokens)] == tokens:
                     rect = fitz.Rect(line[i][:4])
@@ -141,7 +150,7 @@ def stamp_labels(page, textpage=None):
     return found
 
 
-def detect(page, ocr=False):
+def detect(page, ocr=False, labels=None):
     if any(MARKER in (a.info.get("subject", "") or "") for a in (page.annots() or [])):
         return Placement(None, "stamped", "Previously stamped by this tool.")
     textpage = None
@@ -150,7 +159,7 @@ def detect(page, ocr=False):
             textpage = page.get_textpage_ocr(dpi=200, full=True)
         except Exception as exc:
             return Placement(None, "review", f"OCR unavailable: {exc}")
-    anchors = stamp_labels(page, textpage)
+    anchors = stamp_labels(page, textpage, labels)
     if len(anchors) != 1:
         return Placement(None, "review", "No unique stamp label found. Draw the stamp box in preview.")
     anchor = anchors[0]
@@ -180,9 +189,11 @@ def detect(page, ocr=False):
                      "review", "Label found, but no unique vector box. Check or redraw the suggested area.")
 
 
-def inspect(path, ocr=False):
+def inspect(path, ocr=False, operation="stamp", label=None):
     path = Path(path)
     try:
+        if operation not in ("stamp", "signature"):
+            raise ValueError("Unknown certificate operation")
         before = digest(path)
         with fitz.open(path) as doc:
             if doc.needs_pass:
@@ -191,12 +202,16 @@ def inspect(path, ocr=False):
                 raise ValueError("Empty PDF")
             if doc.get_sigflags() > 0:
                 raise ValueError("Digitally signed PDF: stamping would invalidate signatures")
-            pages = [detect(page, ocr) for page in doc]
+            if operation == "signature":
+                from signatures import detect_signature
+                pages = [detect_signature(page, ocr, label) for page in doc]
+            else:
+                pages = [detect(page, ocr, [label] if label else None) for page in doc]
         if digest(path) != before:
             raise ValueError("File changed during analysis; scan again")
-        return Certificate(path, before, pages)
+        return Certificate(path, before, pages, operation=operation)
     except Exception as exc:
-        return Certificate(path, "", [], str(exc))
+        return Certificate(path, "", [], str(exc), operation)
 
 
 def discover(root, output=None):
@@ -228,7 +243,8 @@ def apply_stamp(page, placement, image):
         raise ValueError("Invalid stamp coordinates")
     page.insert_image(rect, stream=image, keep_proportion=True, overlay=True)
     annotation = page.add_rect_annot(rect)
-    annotation.set_info(subject=MARKER, content="Stamped using Cert Stamp Pro")
+    marker = SIGNATURE_MARKER if placement.kind == "signature" else MARKER
+    annotation.set_info(subject=marker, content=f"{placement.kind.title()} applied using Cert Stamp Pro")
     annotation.set_border(width=0)
     annotation.set_flags(fitz.PDF_ANNOT_IS_HIDDEN)
     annotation.update()
@@ -247,6 +263,8 @@ def export_one(cert, source, output, image, mode="first"):
     if cert.error:
         raise ValueError(cert.error)
     indices = selected_pages(cert, mode)
+    if any(cert.pages[i].kind != cert.operation for i in indices):
+        raise ValueError("Placement belongs to another module; scan again")
     if any(cert.pages[i].status not in ("ready", "approved") for i in indices):
         return "skipped: selected page needs review or is already stamped", None
     if digest(cert.path) != cert.digest:
@@ -265,7 +283,7 @@ def export_one(cert, source, output, image, mode="first"):
         os.link(temp, target)
     finally:
         temp.unlink(missing_ok=True)
-    return "stamped", digest(target)
+    return ("signed" if cert.operation == "signature" else "stamped"), digest(target)
 
 
 def batch_export(certificates, source, output, image, mode="first", progress=None, cancelled=None):
@@ -281,6 +299,7 @@ def batch_export(certificates, source, output, image, mode="first", progress=Non
                           for c in certificates[index:])
             break
         entry = {"file": str(cert.path.relative_to(source)), "source_sha256": cert.digest,
+                 "operation": cert.operation,
                  "placements": [asdict(p) for p in cert.pages]}
         try:
             entry["status"], entry["output_sha256"] = export_one(cert, source, output, image, mode)

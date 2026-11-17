@@ -75,3 +75,45 @@ def test_zip_import_populates_preview_and_states(tmp_path, monkeypatch, desktop_
             window.import_session.cleanup()
         window.import_session = None
         window.current = None
+
+
+@pytest.mark.skipif(os.name != "nt" and not os.environ.get("DISPLAY"), reason="Desktop display required")
+def test_signature_preview_approval_and_zip_export(tmp_path, stamp, desktop_window, monkeypatch):
+    from app import messagebox
+    from test_signatures import signature_certificate
+    window = desktop_window
+    window.operation.set("signature")
+    window.field_label.set("Principal")
+    window.reset_analysis()
+    source = tmp_path / "input"
+    path = signature_certificate(source / "a.pdf")
+    image = tmp_path / "signature.png"
+    image.write_bytes(stamp)
+    window.source.set(str(source))
+    window.output.set(str(tmp_path / "signed"))
+    window.signature.set(str(image))
+    window.require_approval.set(True)
+    window.certificates = [inspect(path, operation="signature", label="Principal")]
+    window.current = window.certificates[0]
+    window.tree.insert("", "end", iid="0", text="a.pdf")
+    window.preview()
+    assert window.render_context is not None, window.detail.get()
+    monkeypatch.setattr(window, "work", lambda fn: fn())
+    monkeypatch.setattr(messagebox, "showinfo", lambda *a, **kw: None)
+    window.export()
+    window.poll()
+    assert not (tmp_path / "signed" / "a.pdf").exists()
+    window.approve()
+    window.export()
+    window.poll()
+    assert inspect(tmp_path / "signed" / "a.pdf", operation="signature").pages[0].status == "stamped"
+    import zipfile
+    names = []
+    for archive in tmp_path.glob("signed-*.zip"):
+        with zipfile.ZipFile(archive) as zipped:
+            names.extend(zipped.namelist())
+    assert "a.pdf" in names
+    window.operation.set("stamp")
+    window.field_label.set("")
+    window.require_approval.set(False)
+    window.reset_analysis()

@@ -35,6 +35,10 @@ class App(tk.Tk):
         self.zip_output = tk.BooleanVar(value=True)
         self.output = tk.StringVar()
         self.stamp = tk.StringVar()
+        self.signature = tk.StringVar()
+        self.operation = tk.StringVar(value="stamp")
+        self.field_label = tk.StringVar()
+        self.require_approval = tk.BooleanVar(value=False)
         self.status = tk.StringVar(value="Choose a certificate folder and your stamp image to begin.")
         self.mode = tk.StringVar(value="first")
         self.opacity = tk.DoubleVar(value=0.90)
@@ -61,7 +65,8 @@ class App(tk.Tk):
         for row, (label, var, command) in enumerate([
             ("Folder / ZIP batch", self.source_display, self.choose_source),
             ("Output folder", self.output, self.choose_output),
-            ("Stamp PNG / JPG", self.stamp, self.choose_stamp)]):
+            ("Stamp PNG / JPG", self.stamp, self.choose_stamp),
+            ("Signature PNG / JPG", self.signature, self.choose_signature)]):
             ttk.Label(settings, text=label, width=20).grid(row=row, column=0, sticky="w")
             entry = ttk.Entry(settings, textvariable=var, state="readonly")
             entry.grid(row=row, column=1, sticky="ew", pady=3)
@@ -72,15 +77,29 @@ class App(tk.Tk):
         zip_button = ttk.Button(settings, text="Import ZIP files…", command=self.choose_zip)
         zip_button.grid(row=0, column=3)
         self.controls.append(zip_button)
+        module_bar = ttk.Frame(self, padding=(14, 0, 14, 8))
+        module_bar.pack(fill="x")
+        ttk.Label(module_bar, text="Module:").pack(side="left")
+        modules = ttk.Combobox(module_bar, textvariable=self.operation, values=("stamp", "signature"),
+                               state="readonly", width=12)
+        modules.pack(side="left", padx=8)
+        modules.bind("<<ComboboxSelected>>", lambda event: self.reset_analysis())
+        self.controls.append(modules)
+        ttk.Label(module_bar, text="Field label / signatory role (optional):").pack(side="left")
+        label_entry = ttk.Entry(module_bar, textvariable=self.field_label, width=28)
+        label_entry.pack(side="left", padx=8)
+        label_entry.bind("<KeyRelease>", lambda event: self.reset_analysis())
+        self.controls.append(label_entry)
+        ttk.Label(module_bar, text="Examples: Official Seal, Principal, Registrar").pack(side="left")
         options = ttk.Frame(self, padding=(14, 0, 14, 10))
         options.pack(fill="x")
-        ttk.Label(options, text="Stamp pages:").pack(side="left")
+        ttk.Label(options, text="Target pages:").pack(side="left")
         combo = ttk.Combobox(options, textvariable=self.mode, values=("first", "last", "all"),
                              width=8, state="readonly")
         combo.pack(side="left", padx=7)
         combo.bind("<<ComboboxSelected>>", lambda event: self.refresh_states())
         self.controls.append(combo)
-        for text, var in [("Remove white stamp background", self.white), ("OCR scanned pages", self.ocr)]:
+        for text, var in [("Remove white image background", self.white), ("OCR scanned pages", self.ocr)]:
             control = ttk.Checkbutton(options, text=text, variable=var, command=self.preview)
             control.pack(side="left", padx=10)
             self.controls.append(control)
@@ -89,11 +108,17 @@ class App(tk.Tk):
                             command=lambda value: self.schedule_preview())
         control.pack(side="left")
         self.controls.append(control)
+        approval_bar = ttk.Frame(self, padding=(14, 0, 14, 8))
+        approval_bar.pack(fill="x")
+        review_option = ttk.Checkbutton(approval_bar, text="Require approval for each selected page",
+                                       variable=self.require_approval, command=self.refresh_states)
+        review_option.pack(side="left", padx=8)
+        self.controls.append(review_option)
         actions = ttk.Frame(self, padding=(14, 0, 14, 10))
         actions.pack(fill="x")
         self.scan_button = ttk.Button(actions, text="1   Scan folder", command=self.scan)
         self.scan_button.pack(side="left")
-        self.export_button = ttk.Button(actions, text="2   Stamp ready certificates", command=self.export)
+        self.export_button = ttk.Button(actions, text="2   Export ready certificates", command=self.export)
         self.export_button.pack(side="left", padx=8)
         self.controls.extend([self.scan_button, self.export_button])
         review_button = ttk.Button(actions, text="Save review report", command=self.save_review)
@@ -125,11 +150,16 @@ class App(tk.Tk):
         self.tree.tag_configure("ready", foreground="#17785b")
         self.tree.tag_configure("occupied", foreground="#b42318")
         self.tree.tag_configure("stamped", foreground="#536579")
+        self.tree.tag_configure("signed", foreground="#536579")
         bar = ttk.Frame(right)
         bar.pack(fill="x")
+        ttk.Button(bar, text="◀ PDF", command=lambda: self.turn_certificate(-1)).pack(side="left")
+        ttk.Button(bar, text="PDF ▶", command=lambda: self.turn_certificate(1)).pack(side="left")
         ttk.Button(bar, text="◀ Page", command=lambda: self.turn(-1)).pack(side="left")
         ttk.Button(bar, text="Page ▶", command=lambda: self.turn(1)).pack(side="left")
-        ttk.Checkbutton(bar, text="Show stamp preview", variable=self.overlay,
+        bar = ttk.Frame(right)
+        bar.pack(fill="x", pady=(4, 0))
+        ttk.Checkbutton(bar, text="Show image preview", variable=self.overlay,
                         command=self.preview).pack(side="left", padx=8)
         ttk.Button(bar, text="Approve this area", command=self.approve).pack(side="right")
         ttk.Button(bar, text="Recheck page", command=self.recheck).pack(side="right")
@@ -141,7 +171,7 @@ class App(tk.Tk):
         self.canvas.bind("<B1-Motion>", self.drag_move)
         self.canvas.bind("<ButtonRelease-1>", self.drag_end)
         self.canvas.bind("<Configure>", lambda event: self.schedule_preview())
-        ttk.Label(self, text="Draw a rectangle in the preview to set a custom stamp area. Amber areas require approval.",
+        ttk.Label(self, text="Draw a rectangle in the preview to set a custom image area. Amber areas require review.",
                   padding=(14, 8)).pack(anchor="w")
         ttk.Label(self, textvariable=self.status, padding=(14, 5)).pack(fill="x")
         self.after(100, self.poll)
@@ -176,21 +206,22 @@ class App(tk.Tk):
         if not paths:
             return
         ocr = self.ocr.get()
+        operation, label = self.operation.get(), self.field_label.get().strip()
         output = str(Path(paths[0]).parent / (Path(paths[0]).stem + " - stamped"))
         def run():
             session, root = import_archives(paths,
                 lambda a, b, c: self.events.put(("progress", (a, b, c))), self.cancel.is_set)
             self.events.put(("import", (session, root, paths, output)))
-            self.scan_files(str(root), output, ocr)
+            self.scan_files(str(root), output, ocr, operation, label)
         self.work(run)
 
-    def scan_files(self, root, output, ocr):
+    def scan_files(self, root, output, ocr, operation="stamp", label=None):
         files = discover(root, output)
         results = []
         for index, path in enumerate(files):
             if self.cancel.is_set():
                 break
-            results.append(inspect(path, ocr))
+            results.append(inspect(path, ocr, operation, label))
             self.events.put(("progress", (index + 1, len(files), f"Checking {path.name}")))
         self.events.put(("scan", (results, len(files))))
 
@@ -203,6 +234,7 @@ class App(tk.Tk):
         if path:
             try:
                 rows = [{"file": str(c.path.relative_to(Path(self.source.get()))),
+                         "operation": c.operation,
                          "source_sha256": c.digest, "error": c.error,
                          "pages": [asdict(p) for p in c.pages]} for c in self.certificates]
                 Path(path).write_text(json.dumps(rows, indent=2), encoding="utf-8")
@@ -220,6 +252,37 @@ class App(tk.Tk):
         if path:
             self.stamp.set(path)
             self.preview()
+
+    def choose_signature(self):
+        path = filedialog.askopenfilename(title="Select signature image",
+                                         filetypes=[("Signature images", "*.png *.jpg *.jpeg")])
+        if path:
+            self.signature.set(path)
+            self.preview()
+
+    def active_image(self):
+        return self.signature.get() if self.operation.get() == "signature" else self.stamp.get()
+
+    def reset_analysis(self):
+        if self.busy:
+            return
+        self.current = None
+        self.certificates = []
+        self.tree.delete(*self.tree.get_children())
+        self.canvas.delete("all")
+        self.detail.set("Field settings changed. Scan again to check this module's placement.")
+        self.status.set("Choose the matching image and scan again. Signature mode applies a visible image only.")
+
+    def turn_certificate(self, amount):
+        items = self.tree.get_children()
+        if not items:
+            return
+        selected = self.tree.selection()
+        index = items.index(selected[0]) if selected else 0
+        item = items[max(0, min(len(items) - 1, index + amount))]
+        self.tree.selection_set(item)
+        self.tree.see(item)
+        self.select()
 
     def set_busy(self, value):
         self.busy = value
@@ -248,8 +311,9 @@ class App(tk.Tk):
             messagebox.showinfo("Choose folder", "Choose the unstamped certificate folder first.")
             return
         root, output, ocr = self.source.get(), self.output.get(), self.ocr.get()
+        operation, label = self.operation.get(), self.field_label.get().strip()
         def run():
-            self.scan_files(root, output, ocr)
+            self.scan_files(root, output, ocr, operation, label)
         self.work(run)
 
     def poll(self):
@@ -284,16 +348,16 @@ class App(tk.Tk):
                         self.tree.insert("", "end", iid=str(i), text=str(cert.path.relative_to(Path(self.source.get()))),
                                          values=(state,), tags=(state,))
                     counts = {state: sum(self.certificate_state(c) == state for c in value)
-                              for state in ("ready", "review", "occupied", "stamped", "error")}
+                              for state in ("ready", "review", "occupied", "stamped", "signed", "error")}
                     self.status.set(f"Checked {len(value)}/{total} PDFs · " + " · ".join(f"{k}: {v}" for k, v in counts.items())
                                     + (" · SCAN CANCELLED" if len(value) < total else ""))
                     if value:
                         self.tree.selection_set("0")
                 elif kind == "export":
                     audit, report, archive = value
-                    count = sum(r["status"] == "stamped" for r in report)
+                    count = sum(r["status"] in ("stamped", "signed") for r in report)
                     self.status.set(f"Exported {count}/{len(report)} PDFs. Report: {audit}")
-                    messagebox.showinfo("Export complete", f"Stamped: {count}\nSkipped / errors / cancelled: {len(report) - count}\n\nReport: {audit}"
+                    messagebox.showinfo("Export complete", f"Processed: {count}\nSkipped / errors / cancelled: {len(report) - count}\n\nReport: {audit}"
                                         + (f"\n\nZIP: {archive}" if archive else ""))
         except queue.Empty:
             pass
@@ -311,9 +375,11 @@ class App(tk.Tk):
             return "error"
         states = [cert.pages[i].status for i in selected_pages(cert, self.mode.get())]
         if all(s in ("ready", "approved") for s in states):
+            if self.require_approval.get() and any(s == "ready" for s in states):
+                return "review"
             return "ready"
         if all(s == "stamped" for s in states):
-            return "stamped"
+            return "signed" if cert.operation == "signature" else "stamped"
         if any(s == "occupied" for s in states):
             return "occupied"
         return "review"
@@ -349,9 +415,9 @@ class App(tk.Tk):
         try:
             with fitz.open(self.current.path) as doc:
                 page = doc[self.page_index]
-                if (self.overlay.get() and self.stamp.get() and placement.rect
+                if (self.overlay.get() and self.active_image() and placement.rect
                         and placement.status not in ("occupied", "stamped")):
-                    apply_stamp(page, placement, stamp_bytes(self.stamp.get(), self.opacity.get(), self.white.get()))
+                    apply_stamp(page, placement, stamp_bytes(self.active_image(), self.opacity.get(), self.white.get()))
                 w, h = max(100, self.canvas.winfo_width()), max(100, self.canvas.winfo_height())
                 scale = min((w - 20) / page.rect.width, (h - 20) / page.rect.height)
                 pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
@@ -392,7 +458,8 @@ class App(tk.Tk):
         rect &= bounds
         if rect.width >= 18 and rect.height >= 18:
             with fitz.open(self.current.path) as doc:
-                checked = check_area(doc[self.page_index], rect)
+                checked = check_area(doc[self.page_index], rect, ignore_underline=self.current.operation == "signature")
+            checked.kind = self.current.operation
             if checked.status == "ready":
                 checked.status, checked.reason = "review", "Custom area. Inspect the preview, then approve."
             self.current.pages[self.page_index] = checked
@@ -413,23 +480,31 @@ class App(tk.Tk):
 
     def recheck(self):
         if not self.busy and self.current:
-            updated = inspect(self.current.path, self.ocr.get())
+            updated = inspect(self.current.path, self.ocr.get(), self.operation.get(), self.field_label.get().strip())
             self.current.digest, self.current.pages, self.current.error = updated.digest, updated.pages, updated.error
             self.preview()
             self.refresh_states()
 
     def export(self):
-        if not self.certificates or not self.stamp.get() or not self.output.get():
-            messagebox.showinfo("Complete setup", "Scan the folder, choose your stamp image and choose an output folder.")
+        if not self.certificates or not self.active_image() or not self.output.get():
+            messagebox.showinfo("Complete setup", "Scan the folder, choose the image for the selected module, and choose an output folder.")
             return
         try:
-            image = stamp_bytes(self.stamp.get(), self.opacity.get(), self.white.get())
+            image = stamp_bytes(self.active_image(), self.opacity.get(), self.white.get())
         except Exception as exc:
             messagebox.showerror("Stamp image", str(exc))
             return
         source, output, mode = self.source.get(), self.output.get(), self.mode.get()
         create_zip = self.zip_output.get()
         certificates = copy.deepcopy(self.certificates)
+        if any(c.operation != self.operation.get() for c in certificates):
+            messagebox.showinfo("Scan again", "The selected module changed. Scan again before exporting.")
+            return
+        if self.require_approval.get():
+            for cert in certificates:
+                for p in cert.pages:
+                    if p.status == "ready":
+                        p.status, p.reason = "review", "Preview approval is required for this page before export."
         def run():
             result = batch_export(certificates, source, output, image, mode,
                                   lambda a, b, c: self.events.put(("progress", (a, b, c))), self.cancel.is_set)

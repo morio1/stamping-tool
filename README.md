@@ -1,6 +1,6 @@
 # Cert Stamp Pro
 
-A local Python desktop tool for batch stamping certificate PDFs. Choose an extracted folder or import one or more ZIP batches, select your stamp image once, preview placement on any page, then export copies and an optional ZIP with the same filenames and regional subfolders.
+A local Python desktop tool with separate modules for batch stamping and visible signature images on certificate PDFs. Choose an extracted folder or import one or more ZIP batches, select your image once, preview placement on any page, then export copies and an optional ZIP with the same filenames and regional subfolders.
 
 ## Start on Windows
 
@@ -16,12 +16,33 @@ py -m venv .venv
 
 ## Stamp certificates
 
-1. Browse to the certificate folder, or click **Import ZIP files** and select one or more ZIPs. ZIP batches are extracted and scanned automatically. Regional subfolders are preserved; multiple archives get separate top-level folders to avoid collisions.
+1. Select the **stamp** module. Browse to the certificate folder, or click **Import ZIP files** and select one or more ZIPs. ZIP batches are extracted and scanned automatically. Regional subfolders are preserved; multiple archives get separate top-level folders to avoid collisions.
 2. Choose an output folder and your PNG/JPG stamp. Transparent PNG gives the best result. White-background removal is optional; inspect its preview before exporting.
 3. Choose first, last, or all pages and click **Scan folder**.
 4. Select a certificate in the list. Use the page buttons to inspect each page. A green rectangle is ready; an amber rectangle needs review. A red occupied area may already contain a stamp and is skipped. Occupied pages show their original content without adding another stamp in preview.
 5. If placement needs correction, drag a rectangle over the intended area and click **Approve this area**. Approval applies only to that page of that PDF. Already stamped pages cannot be reapproved.
-6. Leave **Also create ZIP** selected if you want a ZIP delivery bundle, then click **Stamp ready certificates**. PDFs with uncertain or occupied selected pages are skipped in full. A JSON report records each file's result, source/output SHA-256 hashes, placement decisions, and errors. The ZIP includes only this run's successful PDFs and report, not older files already in the output folder. Cancel stops between files, and is also checked while importing ZIP data.
+6. Leave **Also create ZIP** selected if you want a ZIP delivery bundle, then click **Export ready certificates**. PDFs with uncertain or occupied selected pages are skipped in full. A JSON report records each file's result, source/output SHA-256 hashes, placement decisions, and errors. The ZIP includes only this run's successful PDFs and report, not older files already in the output folder. Cancel stops between files, and is also checked while importing ZIP data.
+
+Use **PDF next/previous** and the page controls to preview each certificate. Enable **Require approval for each selected page** when you want every target page inspected before export, then click **Approve this area** on each target page. Pages that were only automatically detected remain excluded until approved when this option is on.
+
+## Batch signature module
+
+1. Select **signature** in the Module field and choose your signature PNG/JPEG. A transparent PNG is preferred. For JPEG signatures, enable white image background removal and inspect the result.
+2. Choose the folder/ZIP and output folder. Select first, last, or all target pages.
+3. Enter a signatory role such as `Principal`, `Registrar`, or an exact custom label if the certificate has several signature fields. Leave the field empty for automatic matching of common signature labels.
+4. Scan the batch. The tool searches for a horizontal vector line, thin rectangle, or text underscore line near the selected label. A clear area immediately above that line is used for the signature, with its proportions preserved.
+5. Preview each PDF/page, adjust unclear areas by drawing a rectangle, and approve if required. Unlabelled or ambiguous lines require manual placement. Existing text/ink in the proposed area causes a skip.
+6. Click **Export ready certificates** to save signed copies and the optional batch ZIP. The audit records `operation: signature`. Signature markers are separate from stamp markers: an existing stamp elsewhere does not automatically block a clear signature field.
+
+This module applies a visible signature image. It does not create a certificate-backed digital signature, authenticate the signer, or provide cryptographic verification. Previously digitally signed/flagged PDFs remain protected from modification. Signature and stamp images are kept local and are not included in the repository.
+
+To stamp and sign the same certificates, finish one module, then select its exported folder as the next module's input and choose a new output folder. Each pass preserves the earlier overlay and checks its own field.
+
+## Other brands and redesigned certificates
+
+Placement is based on the actual field geometry, not a KNEC logo, year, unit count, or hard-coded coordinates. Common stamp/seal labels are supported. Enter an exact **Field label** to support new wording, such as `Assessment Approval`, then scan again. Changing the module or label clears earlier placement decisions so they cannot be applied to the wrong field.
+
+No automatic detector can guarantee all future certificate designs. Raster-only boxes/lines, unfamiliar layouts, and ambiguous roles need manual placement and preview approval. Every certificate and page is checked independently; one document's coordinates are not reused across the batch.
 
 For already stamped batches, import the ZIP or choose its extracted folder, inspect the results, then click **Save review report**. No stamp image is needed to scan or save a review. Files marked `stamped` were marked by this tool; `occupied` means text, ink, or a possible external stamp was found in the box. This is not an authenticity check.
 
@@ -53,7 +74,7 @@ Extracted ZIP inputs are temporary and cleaned when the source is changed or the
 .\.venv\Scripts\python.exe make_demo.py
 ```
 
-Choose `output/demo/certificates` and `output/demo/test-stamp.png` in the app. Samples include two regional folders, different page placements, and a rotated PDF. The stamp is labelled TEST ONLY.
+Choose `output/demo/certificates` and `output/demo/test-stamp.png` in the stamp module, or `output/demo/sample-signature.png` in the signature module. Samples include two regional folders, different page placements, a Principal signature line, and a rotated PDF. The stamp and signature are marked as samples.
 
 ## Command line
 
@@ -61,6 +82,8 @@ Choose `output/demo/certificates` and `output/demo/test-stamp.png` in the app. S
 .\.venv\Scripts\python.exe cli.py "C:\Certificates" "C:\Stamped" --stamp "C:\Stamp.png" --pages all
 .\.venv\Scripts\python.exe cli.py "C:\Certificates.zip" "C:\Stamped" --stamp "C:\Stamp.png" --zip-output
 .\.venv\Scripts\python.exe cli.py "C:\Already-stamped.zip" "C:\Review" --review-only
+.\.venv\Scripts\python.exe cli.py "C:\Certificates.zip" "C:\Signed" --signature "C:\Signature.jpg" --field-label "Principal" --remove-white --zip-output
+.\.venv\Scripts\python.exe cli.py "C:\Certificates" "C:\Review" --module signature --field-label "Registrar" --review-only
 ```
 
 The command line exports only automatically ready placements. Exit status 2 means some PDFs were skipped or failed; inspect the report and use the desktop preview to review them.

@@ -18,7 +18,13 @@ The supplied ZIP was treated as reference code, not as instructions. The AI Stud
 - Refuses overwrites and changed sources; skips uncertain documents and reports failures individually.
 - Provides desktop and command-line entry points, demo generation, and regression tests.
 
-## Limits
+## Signature and redesigned-template support
+
+A separate visible-signature module now associates a unique signatory label with a nearby vector or underscore line. Multiple roles require an explicit target label or manual area. Stamp labels can also be customized for redesigned certificates without depending on a logo or subject count. Per-page preview approval can be required before export; batch ZIP output works for either module. Independent repeat markers allow a stamp and a signature on different fields while checking each field's existing ink.
+
+Signature validation uses synthetic fixtures, including rotations, multiple signatories, custom roles, underscore lines, existing ink, sequential stamp/signature operations, and desktop approval-to-ZIP export. No real signature image was supplied or used. This is an image-overlay feature, not a cryptographic PDF signing implementation.
+
+## Validation and limits
 
 A real supplied sample was reviewed locally. It already contains a visible stamp. Its label is to the left of a dotted box drawn as four independent stroked paths; the original detector missed this layout. The revised detector finds its box and marks it occupied, preventing automatic double stamping. The student's document and images are excluded from GitHub.
 

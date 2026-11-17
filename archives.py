@@ -101,7 +101,7 @@ def package_results(output, report, audit, destination=None, progress=None, canc
     target = target.resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
     temp = target.with_name(f".{uuid.uuid4().hex}.tmp")
-    successes = [r for r in report if r["status"] == "stamped"]
+    successes = [r for r in report if r["status"] in ("stamped", "signed")]
     try:
         with zipfile.ZipFile(temp, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
             for index, row in enumerate(successes):
