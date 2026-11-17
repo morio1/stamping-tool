@@ -165,7 +165,8 @@ def detect(page, ocr=False, labels=None):
     anchor = anchors[0]
     candidates = []
     for r in vector_boxes(page):
-        label_left = 0 <= r.x0 - anchor.x1 <= 35 and r.y0 <= (anchor.y0 + anchor.y1) / 2 <= r.y1
+        label_gap = max(35, min(80, r.width * 0.45))
+        label_left = 0 <= r.x0 - anchor.x1 <= label_gap and r.y0 <= (anchor.y0 + anchor.y1) / 2 <= r.y1
         label_above_below = (r.x0 - 30 <= anchor.x0 <= r.x1
                             and r.y0 - 35 <= anchor.y0 <= r.y1 + 25)
         if label_left or label_above_below:
@@ -178,8 +179,12 @@ def detect(page, ocr=False, labels=None):
             r = fitz.Rect(r.x0 + 5, r.y0 + 5, r.x1 - 5, r.y1 - 5)
             if r.width >= 30 and r.height >= 24:
                 candidates.append(r)
-    if len(candidates) == 1:
-        return check_area(page, candidates[0])
+    if candidates:
+        # A visible stamp may itself have a rectangular border inside the field.
+        # Use the enclosing field so its existing ink is checked, not a false ambiguity.
+        enclosing = [r for r in candidates if all(r.contains(other) for other in candidates)]
+        if len(enclosing) == 1:
+            return check_area(page, enclosing[0])
     # Suggest an area but require review: a text anchor alone is insufficient proof.
     bounds = page_bounds(page)
     proposed = fitz.Rect(anchor.x0, anchor.y1 + 6,
@@ -235,6 +240,34 @@ def selected_pages(cert, mode):
     if mode == "last":
         return [len(cert.pages) - 1]
     return list(range(len(cert.pages)))
+
+
+def batch_preflight(certificates, source, output, mode="first", require_approval=False):
+    """Count full-document decisions before any output is written."""
+    source, output = Path(source).resolve(), Path(output).resolve()
+    if output == source or source.is_relative_to(output):
+        raise ValueError("Choose an output folder separate from input and its parents")
+    counts = dict(total=len(certificates), ready=0, review=0, occupied=0,
+                  already_applied=0, errors=0, existing_output=0)
+    for cert in certificates:
+        if cert.error:
+            counts["errors"] += 1
+            continue
+        relative = cert.path.resolve().relative_to(source)
+        if (output / relative).exists():
+            counts["existing_output"] += 1
+            continue
+        states = [cert.pages[i].status for i in selected_pages(cert, mode)]
+        if any(s == "occupied" for s in states):
+            key = "occupied"
+        elif any(s == "stamped" for s in states):
+            key = "already_applied"
+        elif all(s == "approved" or (s == "ready" and not require_approval) for s in states):
+            key = "ready"
+        else:
+            key = "review"
+        counts[key] += 1
+    return counts
 
 
 def apply_stamp(page, placement, image):

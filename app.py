@@ -11,7 +11,7 @@ import pymupdf as fitz
 from PIL import Image, ImageTk
 
 from stamper import (Placement, apply_stamp, batch_export, discover, inspect,
-                     check_area, page_bounds, selected_pages, stamp_bytes)
+                     batch_preflight, check_area, page_bounds, selected_pages, stamp_bytes)
 from archives import import_archives, package_results
 from dataclasses import asdict
 
@@ -40,6 +40,7 @@ class App(tk.Tk):
         self.field_label = tk.StringVar()
         self.require_approval = tk.BooleanVar(value=False)
         self.status = tk.StringVar(value="Choose a certificate folder and your stamp image to begin.")
+        self.batch_summary = tk.StringVar(value="Scan a batch to see readiness totals before export.")
         self.mode = tk.StringVar(value="first")
         self.opacity = tk.DoubleVar(value=0.90)
         self.white = tk.BooleanVar(value=False)
@@ -130,6 +131,7 @@ class App(tk.Tk):
         ttk.Button(actions, text="Cancel job", command=self.cancel.set).pack(side="left")
         self.progress = ttk.Progressbar(actions, mode="determinate")
         self.progress.pack(side="right", fill="x", expand=True, padx=14)
+        ttk.Label(self, textvariable=self.batch_summary, padding=(14, 0, 14, 8), wraplength=1100).pack(fill="x")
         pane = ttk.Panedwindow(self, orient="horizontal")
         pane.pack(fill="both", expand=True, padx=14)
         left = ttk.Frame(pane)
@@ -199,6 +201,7 @@ class App(tk.Tk):
             self.current = None
             self.tree.delete(*self.tree.get_children())
             self.canvas.delete("all")
+            self.update_summary()
 
     def choose_zip(self):
         paths = filedialog.askopenfilenames(title="Choose certificate ZIP batches",
@@ -246,6 +249,7 @@ class App(tk.Tk):
         path = filedialog.askdirectory(title="Choose output folder")
         if path:
             self.output.set(path)
+            self.update_summary()
 
     def choose_stamp(self):
         path = filedialog.askopenfilename(filetypes=[("Stamp images", "*.png *.jpg *.jpeg")])
@@ -270,6 +274,7 @@ class App(tk.Tk):
         self.certificates = []
         self.tree.delete(*self.tree.get_children())
         self.canvas.delete("all")
+        self.update_summary()
         self.detail.set("Field settings changed. Scan again to check this module's placement.")
         self.status.set("Choose the matching image and scan again. Signature mode applies a visible image only.")
 
@@ -353,10 +358,12 @@ class App(tk.Tk):
                                     + (" · SCAN CANCELLED" if len(value) < total else ""))
                     if value:
                         self.tree.selection_set("0")
+                    self.update_summary()
                 elif kind == "export":
                     audit, report, archive = value
                     count = sum(r["status"] in ("stamped", "signed") for r in report)
                     self.status.set(f"Exported {count}/{len(report)} PDFs. Report: {audit}")
+                    self.update_summary()
                     messagebox.showinfo("Export complete", f"Processed: {count}\nSkipped / errors / cancelled: {len(report) - count}\n\nReport: {audit}"
                                         + (f"\n\nZIP: {archive}" if archive else ""))
         except queue.Empty:
@@ -388,6 +395,20 @@ class App(tk.Tk):
         for i, cert in enumerate(self.certificates):
             state = self.certificate_state(cert)
             self.tree.item(str(i), values=(state,), tags=(state,))
+        self.update_summary()
+
+    def update_summary(self):
+        if not self.certificates:
+            self.batch_summary.set("Scan a batch to see readiness totals before export.")
+            return
+        try:
+            counts = batch_preflight(self.certificates, self.source.get(), self.output.get(),
+                                     self.mode.get(), self.require_approval.get())
+            self.batch_summary.set(f"Batch: {counts['total']} · Ready: {counts['ready']} · Needs review: {counts['review']}"
+                                   f" · Occupied: {counts['occupied']} · Already applied: {counts['already_applied']}"
+                                   f" · Errors: {counts['errors']} · Output exists: {counts['existing_output']}")
+        except ValueError as exc:
+            self.batch_summary.set(str(exc))
 
     def turn(self, amount):
         if self.current and self.current.pages:
@@ -488,6 +509,16 @@ class App(tk.Tk):
     def export(self):
         if not self.certificates or not self.active_image() or not self.output.get():
             messagebox.showinfo("Complete setup", "Scan the folder, choose the image for the selected module, and choose an output folder.")
+            return
+        try:
+            preflight = batch_preflight(self.certificates, self.source.get(), self.output.get(),
+                                       self.mode.get(), self.require_approval.get())
+        except ValueError as exc:
+            messagebox.showerror("Output folder", str(exc))
+            return
+        if preflight["ready"] == 0:
+            self.update_summary()
+            messagebox.showinfo("No certificates ready", "Review the batch summary. Approve required pages, correct unclear fields, or choose a fresh output folder.")
             return
         try:
             image = stamp_bytes(self.active_image(), self.opacity.get(), self.white.get())

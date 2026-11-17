@@ -26,6 +26,10 @@ Signature validation uses synthetic fixtures, including rotations, multiple sign
 
 ## Validation and limits
 
+A later 1,000-clear-certificate benchmark covered 1-7 subjects, independently varied stamp-box positions, two field-label styles and four page rotations. The first run correctly sent 200 short-label layouts to review rather than guessing. Detection was extended to associate a shorter left-hand seal label across a bounded, box-relative gap. The rerun stamped all 1,000 fixtures, verified every image stayed in its detected area, checked original hashes, text/page rotations and ZIP integrity, and completed in 36.59 seconds including verification. A new regression test covers that label spacing.
+
+Preflight now counts every document before export, including occupied/review cases and existing outputs. The benchmark is reproducible under `benchmarks/mixed_batch.py`. Real performance and layout coverage still depend on the actual input documents.
+
 A real supplied sample was reviewed locally. It already contains a visible stamp. Its label is to the left of a dotted box drawn as four independent stroked paths; the original detector missed this layout. The revised detector finds its box and marks it occupied, preventing automatic double stamping. The student's document and images are excluded from GitHub.
 
 New regression fixtures cover one through seven units, independently varied box positions, occupied boxes, rotations, ZIP import/export, malformed paths, duplicate names, existing-file protection, cancellation, and multi-archive collisions. A synthetic 281-file ZIP batch produced 252 stamped PDFs, 28 skips for occupied boxes, and one corrupt-input error, with no original modifications.

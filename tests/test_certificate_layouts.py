@@ -51,3 +51,13 @@ def test_two_sides_do_not_claim_box(tmp_path):
         page.draw_line((150, 312), (332, 312))
         page.draw_line((150, 385), (332, 385))
         assert detect(page).status == "review"
+
+
+def test_short_seal_label_with_larger_left_gap():
+    with fitz.open() as doc:
+        page = doc.new_page(width=842, height=595)
+        page.insert_text((60, 340), "Official Seal:", fontsize=7)
+        page.draw_rect(fitz.Rect(150, 300, 332, 373))
+        result = detect(page)
+        assert result.status == "ready", result.reason
+        assert result.rect == pytest.approx((155, 305, 327, 368))

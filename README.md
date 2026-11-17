@@ -56,6 +56,10 @@ PDFs are inspected and exported one at a time; previews load only the selected P
 
 A synthetic 281-file mixed ZIP batch was tested locally: 252 PDFs were stamped, 28 occupied PDFs were skipped, and one damaged PDF was reported as an error. Import, analysis, export, and packaging took about 10 seconds on the test computer. Real performance depends on page count, PDF size, image resolution, OCR, and disk speed.
 
+A separate 1,000-file synthetic ZIP benchmark with 1-7 units, independently varied box positions, stamp/seal labels and all four rotations exported all 1,000 clear certificates. Every overlay's bounds and original-file hash were verified, along with retained text and page rotations. Import, processing, packaging and verification took 36.59 seconds locally. These were small synthetic PDFs; this is not a timing or correctness guarantee for 1,000 real certificates. Run `python benchmarks/mixed_batch.py --count 1000` to reproduce the checks with fresh synthetic files.
+
+The desktop now shows a preflight summary of ready, review, occupied, already-applied, error and existing-output counts. Read [the batch guide](BATCH_GUIDE.md) for a step-by-step 1,000-file workflow and suggested future improvements.
+
 Extracted ZIP inputs are temporary and cleaned when the source is changed or the app closes normally. Original ZIPs are never modified. Scan cancellation is shown as a partial checked count; rescan to process the full batch.
 
 ## Data and file handling

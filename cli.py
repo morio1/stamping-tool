@@ -5,7 +5,7 @@ import zipfile
 from dataclasses import asdict
 from pathlib import Path
 
-from stamper import batch_export, discover, inspect, stamp_bytes
+from stamper import batch_export, batch_preflight, discover, inspect, stamp_bytes
 from archives import import_archives, package_results
 
 
@@ -51,6 +51,7 @@ def main():
         if not image_path:
             parser.error("Choose --stamp or --signature unless --review-only is selected")
         image = stamp_bytes(image_path, args.opacity, args.remove_white)
+        print("Batch preflight: " + json.dumps(batch_preflight(certs, root, args.output, args.pages)))
         audit, rows = batch_export(certs, root, args.output, image, args.pages,
                                   lambda i, n, status: print(f"{i}/{n}: {status}"))
         print(f"Audit report: {audit}")
