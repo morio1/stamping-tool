@@ -30,7 +30,7 @@ def main():
         parser.error("The image type and selected module must match")
     session = None
     try:
-        root = args.input
+        root = args.input.resolve()
         if args.input.is_file() and args.input.suffix.lower() == ".zip":
             session, root = import_archives([args.input])
         files = discover(root, args.output)

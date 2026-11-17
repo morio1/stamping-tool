@@ -295,10 +295,10 @@ def batch_export(certificates, source, output, image, mode="first", progress=Non
     report = []
     for index, cert in enumerate(certificates):
         if cancelled and cancelled():
-            report.extend({"file": str(c.path.relative_to(source)), "status": "cancelled"}
+            report.extend({"file": str(c.path.resolve().relative_to(source)), "status": "cancelled"}
                           for c in certificates[index:])
             break
-        entry = {"file": str(cert.path.relative_to(source)), "source_sha256": cert.digest,
+        entry = {"file": str(cert.path.resolve().relative_to(source)), "source_sha256": cert.digest,
                  "operation": cert.operation,
                  "placements": [asdict(p) for p in cert.pages]}
         try:

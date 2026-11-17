@@ -82,7 +82,8 @@ def extract_pdfs(archive, destination, progress=None, cancelled=None,
 def import_archives(paths, progress=None, cancelled=None):
     """Caller owns TemporaryDirectory until all previews/exports have finished."""
     session = tempfile.TemporaryDirectory(prefix="cert-stamp-import-")
-    root = Path(session.name)
+    # Windows TEMP can use an 8.3 alias while discovered paths use long names.
+    root = Path(session.name).resolve()
     try:
         for index, archive in enumerate(paths):
             # Separate archives cannot collide even when their basenames match.

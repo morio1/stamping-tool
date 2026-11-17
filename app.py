@@ -192,7 +192,7 @@ class App(tk.Tk):
             if self.import_session:
                 self.import_session.cleanup()
                 self.import_session = None
-            self.source.set(path)
+            self.source.set(str(Path(path).resolve()))
             self.source_display.set(path)
             self.output.set(str(Path(path).parent / (Path(path).name + " - stamped")))
             self.certificates = []
@@ -233,7 +233,7 @@ class App(tk.Tk):
                                           initialfile="certificate-review.json", filetypes=[("JSON report", "*.json")])
         if path:
             try:
-                rows = [{"file": str(c.path.relative_to(Path(self.source.get()))),
+                rows = [{"file": str(c.path.resolve().relative_to(Path(self.source.get()).resolve())),
                          "operation": c.operation,
                          "source_sha256": c.digest, "error": c.error,
                          "pages": [asdict(p) for p in c.pages]} for c in self.certificates]
@@ -345,7 +345,7 @@ class App(tk.Tk):
                     self.tree.delete(*self.tree.get_children())
                     for i, cert in enumerate(value):
                         state = self.certificate_state(cert)
-                        self.tree.insert("", "end", iid=str(i), text=str(cert.path.relative_to(Path(self.source.get()))),
+                        self.tree.insert("", "end", iid=str(i), text=str(cert.path.resolve().relative_to(Path(self.source.get()).resolve())),
                                          values=(state,), tags=(state,))
                     counts = {state: sum(self.certificate_state(c) == state for c in value)
                               for state in ("ready", "review", "occupied", "stamped", "signed", "error")}

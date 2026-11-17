@@ -1,5 +1,6 @@
 import stat
 import zipfile
+from pathlib import Path
 
 import pytest
 
@@ -96,3 +97,25 @@ def test_symlink_zip_rejected(tmp_path):
         z.writestr(info, "../elsewhere")
     with pytest.raises(ValueError, match="symbolic"):
         extract_pdfs(archive, tmp_path / "out")
+
+
+def test_import_root_is_canonical_when_temp_uses_an_alias(tmp_path, monkeypatch):
+    import archives
+    original = archives.tempfile.TemporaryDirectory
+    class AliasedTemporaryDirectory:
+        def __init__(self, **kwargs):
+            self.session = original(**kwargs)
+            actual = Path(self.session.name)
+            self.name = str(actual / ".." / actual.name)
+        def cleanup(self):
+            self.session.cleanup()
+    monkeypatch.setattr(archives.tempfile, "TemporaryDirectory", AliasedTemporaryDirectory)
+    archive = tmp_path / "input.zip"
+    with zipfile.ZipFile(archive, "w") as zipped:
+        zipped.writestr("Region/a.pdf", b"test")
+    session, root = import_archives([archive])
+    try:
+        assert root == root.resolve()
+        assert discover(root)[0].relative_to(root).as_posix() == "Region/a.pdf"
+    finally:
+        session.cleanup()
