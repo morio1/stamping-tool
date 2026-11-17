@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+.pytest_cache/
+reference/
+tmp/
+output/
+*.pdf
+*.png
+*.jpg
+audit-*.json
+*.zip
