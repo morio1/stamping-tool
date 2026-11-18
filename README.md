@@ -1,6 +1,6 @@
 # Cert Stamp Pro
 
-**Developed and maintained by [Willy Wanjau (@morio1)](https://github.com/morio1).**
+**Developed and maintained by [Willy Wanjau](https://github.com/morio1).**
 
 For the clean operational download, use the **Live Stamping ZIP** on the [Releases page](https://github.com/morio1/stamping-tool/releases/latest). Extract it and double-click `Live Stamping/start.bat`. The source repository also includes development tests and verification tools; they are intentionally excluded from the operational ZIP.
 
